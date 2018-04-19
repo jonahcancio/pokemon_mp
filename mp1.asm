@@ -19,15 +19,24 @@ stringBuffer:	.space	128
 bytesBuffer:	.space	128
 ramName:	.asciiz	"Pokemon Red (U) [S][BF].sav"
 ramBuffer:	.space	32768
+
+checkSumString:	.asciiz	"Checksum: "
 fileErrorString:	.asciiz	"Error reading/writing file"
 currentName:	.asciiz	"Current Name: "
 enterNewName:	.asciiz	"\nPlease enter new name:\n"
+currentMoney:	.asciiz	"Current Money: "
+enterNewMoney:	.asciiz	"\nPlease enter new money:\n"
 
 .text
 .macro	print_int(%reg)
 	move	$a0, %reg
 	li	$v0, 1
 	syscall
+.end_macro
+.macro	scan_int(%reg)
+	li	$v0, 5
+	syscall
+	move	%reg, $v0
 .end_macro
 .macro	print_hex(%reg)
 	move	$a0, %reg
@@ -87,9 +96,8 @@ enterNewName:	.asciiz	"\nPlease enter new name:\n"
 .end_macro
 main:	
 	jal	InitRamBuffer
-#	jal	ChangeName
-	jal	GetMoney
-	print_int($v0)
+	jal	ChangeName
+#	jal	ChangeMoney
 	li	$v0, 10
 	syscall
 	
@@ -180,6 +188,7 @@ CheckSumLoop:	bge	$t0, 0x3523, CheckSumBreak
 CheckSumBreak:	nor	$t2, $t2, $t2
 	andi	$t2, $t2, 0x000000FF
 	lbu	$t1, ramBuffer+0x3523
+	print_string(checkSumString)
 	print_int($t1)
 	print_char('=')
 	print_char('>')
@@ -224,19 +233,20 @@ ChangeName:	push($ra)
 	jal	GetName
 	print_string(currentName)
 	print_string(stringBuffer)
-
-	open_file(ramName, $s6, 1)
+	
 	print_string(enterNewName)
 	scan_string(stringBuffer)
 	jal	StripNewLine
 	jal	SetName
 	jal	FixCheckSum
+
+	open_file(ramName, $s6, 1)
 	write_file(ramBuffer, $s6, 32768)
 	close_file($s6)
 	pop($ra)
 	jr	$ra
 	
-#take BCD in a0 and outputs decimal equicalent in v0
+#take BCD in a0 and outputs decimal equivalent in v0
 BcdToDecimal:	push($ra)
 	push($s0)
 	push($t0)
@@ -266,7 +276,35 @@ BcdToDecimalBreak:	move	$v0, $t2		#return decimal sum
 	pop($ra)
 	jr	$ra
 
-
+#take decimal input a0 and output BCD equivalent in v0
+DecimalToBcd:	push($ra)
+	push($s0)
+	push($t0)
+	push($t1)
+	push($t2)
+	push($t3)
+	move	$s0, $a0
+	li	$t0, 0		#t3 = digit index
+	li	$t2, 0		#t2 = sum = bcd
+DecimalToBcdLoop:	beqz	$s0, DecimalToBcdBreak
+	div	$s0, $s0, 10		#t0 = t0/10 = quotient
+	mfhi	$t1		#t1 = t0%10 = remainder
+	li	$t3, 0		#t4 = power16 index
+Power16Loop:	bge	$t3, $t0, Power16Break	#while not yet fullpowere16'ed
+	mul	$t1, $t1, 16		#power up t1 by one 16
+	addi	$t3, $t3, 1		
+	j	Power16Loop
+Power16Break:	add	$t2, $t2, $t1		#sum += 16-powered remainder
+	addi	$t0, $t0, 1		
+	j	DecimalToBcdLoop
+DecimalToBcdBreak:	move	$v0, $t2		#return decimal sum
+	pop($t3)
+	pop($t2)
+	pop($t1)
+	pop($t0)
+	pop($s0)
+	pop($ra)
+	jr	$ra
 
 #get movey and store value in v0
 GetMoney:	push($ra)
@@ -286,10 +324,38 @@ GetMoneyBreak:	move	$a0, $t4
 	pop($ra)
 	jr	$ra
 
-#input money and stor value in ramBits
+#input decimal money in a0 and store value in ramBuffer
 SetMoney:	push($ra)
-	move	$s0, $a0
+	jal	DecimalToBcd
+	move	$s0, $v0
+	andi	$t1, $s0, 0x00FF0000
+	srl	$t1, $t1, 16
+	sb	$t1, ramBuffer+0x25f3
+	andi	$t1, $s0, 0x0000FF00
+	srl	$t1, $t1, 8
+	sb	$t1, ramBuffer+0x25f4
+	andi	$t1, $s0, 0x000000FF
+	srl	$t1, $t1, 0
+	sb	$t1, ramBuffer+0x25f5
+SetMoneyBreak:	pop($ra)
+	jr	$ra
 	
+#output current money, get input new money, change current money
+ChangeMoney:	push($ra)
+	push($s2)
+	jal	GetMoney
+	move	$s2, $v0
+	print_string(currentMoney)
+	print_int($s2)
+	
+	print_string(enterNewMoney)
+	scan_int($a0)
+	jal	SetMoney
+	jal	FixCheckSum
+	
+	open_file(ramName, $s6, 1)
+	write_file(ramBuffer, $s6, 32768)
+	close_file($s6)
+	pop($s2)
 	pop($ra)
 	jr	$ra
-#output current money, get input new money, change current money
