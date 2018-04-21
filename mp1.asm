@@ -27,6 +27,18 @@ enterNewName:	.asciiz	"\nPlease enter new name:\n"
 currentMoney:	.asciiz	"Current Money: "
 enterNewMoney:	.asciiz	"\nPlease enter new money:\n"
 
+badgeList:	.space	32
+boulderBadge:	.asciiz	"BOULDERBADGE"
+cascadeBadge:	.asciiz	"CASCADEBADGE"
+thunderBadge:	.asciiz	"THUNDERBADGE"
+rainbowBadge:	.asciiz	"RAINBOWBADGE"
+soulBadge:	.asciiz	"SOULBADGE"
+marshBadge:	.asciiz	"MARSHBADGE"
+volcanoBadge:	.asciiz	"VOLCANOBADGE"
+earthBadge:	.asciiz	"EARTHBADGE"
+noneString:	.asciiz	"NONE"
+currentBadges:	.asciiz	"Curren Badges:\n"
+enterNewBadges:	.asciiz	"\nPlease enter the 8-char binary string rep for your new badges:\n"
 .text
 .macro	print_int(%reg)
 	move	$a0, %reg
@@ -96,8 +108,11 @@ enterNewMoney:	.asciiz	"\nPlease enter new money:\n"
 .end_macro
 main:	
 	jal	InitRamBuffer
-	jal	ChangeName
+	jal	InitBadgeList
+#	jal	ChangeName
 #	jal	ChangeMoney
+	jal	ChangeBadges
+	jal	GetBadges
 	li	$v0, 10
 	syscall
 	
@@ -357,5 +372,91 @@ ChangeMoney:	push($ra)
 	write_file(ramBuffer, $s6, 32768)
 	close_file($s6)
 	pop($s2)
+	pop($ra)
+	jr	$ra
+	
+#initialize badgelist	
+InitBadgeList:	push($ra)
+	li	$t0, 0
+	la	$t1, boulderBadge
+	sw	$t1, badgeList($t0)
+	addi	$t0, $t0, 4
+	la	$t1, cascadeBadge
+	sw	$t1, badgeList($t0)
+	addi	$t0, $t0, 4
+	la	$t1, thunderBadge
+	sw	$t1, badgeList($t0)
+	addi	$t0, $t0, 4
+	la	$t1, rainbowBadge
+	sw	$t1, badgeList($t0)
+	addi	$t0, $t0, 4
+	la	$t1, soulBadge
+	sw	$t1, badgeList($t0)
+	addi	$t0, $t0, 4
+	la	$t1, marshBadge
+	sw	$t1, badgeList($t0)
+	addi	$t0, $t0, 4
+	la	$t1, volcanoBadge
+	sw	$t1, badgeList($t0)
+	addi	$t0, $t0, 4
+	la	$t1, earthBadge
+	sw	$t1, badgeList($t0)	
+	pop($ra)
+	jr	$ra
+
+
+#Get Badges and Print
+GetBadges:	push($ra)
+	lbu	$s0, ramBuffer+0x2602
+	li	$t0, 0		#badgelist index
+	li	$t2, 0x00000001		#badgemask
+	li	$t3, 0		#badge count
+GetBadgeLoop:	bge	$t0, 32, GetBadgeBreak
+	and	$t1, $s0, $t2
+	bne	$t1, $t2, GetBadgeNoPrint
+	lw	$a0, badgeList($t0)
+	li	$v0, 4
+	syscall
+	addi	$t3, $t3, 1
+	print_char('\t')
+GetBadgeNoPrint:	sll	$t2, $t2, 1
+	addi	$t0, $t0, 4
+	j	GetBadgeLoop
+GetBadgeBreak:	bnez	$t3, GetBadgeMeron
+	print_string(noneString)
+GetBadgeMeron:	print_char('\n')
+	pop($ra)
+	jr	$ra
+
+
+#Set Badges with binary byte input in stringBuffer
+SetBadges:	push($ra)
+	li	$t0, 0		#index
+	li	$t2, 0x00000080		#badge corresponding bit
+	li	$t3, 0		#sum total badge output
+SetBadgeLoop:	bge	$t0, 8, SetBadgeBreak
+	lbu	$t1, stringBuffer($t0)
+	bne	$t1, 49, SetBadgeNoAdd
+	add	$t3, $t3, $t2
+SetBadgeNoAdd:	srl	$t2, $t2, 1
+	addi	$t0, $t0, 1
+	j	SetBadgeLoop
+SetBadgeBreak:	sb	$t3, ramBuffer+0x2602
+	pop($ra)
+	jr	$ra
+	
+#gets badges, prints them, takes input 8-bit string rep, changes badges
+ChangeBadges: 	push($ra)
+	print_string(currentBadges)
+	jal	GetBadges
+	print_string(enterNewBadges)
+	scan_string(stringBuffer)
+	jal	StripNewLine
+	jal	SetBadges
+	jal	FixCheckSum
+	
+	open_file(ramName, $s6, 1)
+	write_file(ramBuffer, $s6, 32768)
+	close_file($s6)
 	pop($ra)
 	jr	$ra
