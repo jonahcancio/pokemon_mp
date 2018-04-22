@@ -87,7 +87,55 @@ def check_item_names():
 			print("Not a number")
 		idString = input("Enter byte: ")
 
+
+def add_item(id, qty):
+	global ramBytes
+
+	with open(ramName, "rb") as f:
+		ramBytes = f.read()
+
+	itemCount = 0
+	fBarr = bytearray(ramBytes)
+	isAlreadyInBag = False
+	offset = 0x25ca
+
+	#check if item is already in bag and find offset
+	for i,b in enumerate(fBarr[0x25ca:(0x25ca+40):2]):
+		if b == id:
+			isAlreadyInBag = True
+			offset += i*2
+			break
+		if b == 0xff:
+			offset += i*2
+			break
+	else:
+		print("Bag is full")
+		return
+
+	#increment all items count
+	if not isAlreadyInBag:
+		print("New Item Added at bag offset {:#02x}".format(offset) )
+		fBarr[0x25c9] += 1
+		itemCount = fBarr[0x25c9]
+	else:
+		print("Item already in bag offset {:#02x}".format(offset) )
+
+	fBarr[0x25ca + 2*itemCount] = 0xff
+	fBarr[offset] = id
+	fBarr[offset+1] = qty
+
+	ramBytes = bytes(fBarr)
+
+	fix_checksum()
+
+	with open(ramName, "wb") as f:
+		f.write(ramBytes)
+
 #check_dict();
 
+
+
 #check item
-check_item_names()
+#check_item_names()
+add_item(0x01, 99)
+add_item(0x06, 1)
