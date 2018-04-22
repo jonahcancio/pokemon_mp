@@ -117,48 +117,94 @@ enterNewItems:	.asciiz	"\n#Please enter new item in format: <#> 0x<ID> <QTY>\n"
 	close_file($s6)
 	move	$v0, $t0
 .end_macro
-
-main:	
-	init_ram_buffer
-	jal	InitRomBuffer
-	jal	InitBadgeList
-#	jal	ChangeName
-#	jal	ChangeMoney
-#	jal	ChangeBadges
-	jal	ChangeItems
-	jal	CommitRamBuffer
-	li	$v0, 10
-	syscall
-	
-#FUNCTIONS START HERE
-#initialize ramBuffer
-InitRamBuffer:	push($ra)
-	open_file(ramName, $s6, 0)
-	read_file(ramBuffer, $s6, 32768)
-	move	$t0, $v0
-	close_file($s6)
-	move	$v0, $t0
-	pop($ra)
-	jr	$ra
-	
-#writes ramBuffer to file
-CommitRamBuffer:	push($ra)
+.macro	commit_ram_buffer
 	jal	FixCheckSum
 	open_file(ramName, $s6, 1)
 	write_file(ramBuffer, $s6, 32768)
 	close_file($s6)
-	pop($ra)
-	jr	$ra
-
-#initialize ramBuffer
-InitRomBuffer:	push($ra)
+.end_macro
+.macro	init_rom_buffer
 	open_file(romName, $s7, 0)
 	read_file(romBuffer, $s7, 1048576)
 	move	$t0, $v0
 	close_file($s7)
 	move	$v0, $t0
-	pop($ra)
-	jr	$ra
+.end_macro
+.macro	change_name
+	jal	GetName
+	print_string(currentName)
+	print_string(stringBuffer)
+	
+	print_string(enterNewName)
+	scan_string(stringBuffer)
+	jal	StripNewLine
+	jal	SetName
+.end_macro
+.macro	change_money
+	jal	GetMoney
+	move	$s2, $v0
+	print_string(currentMoney)
+	print_int($s2)
+	
+	print_string(enterNewMoney)
+	scan_int($a0)
+	jal	SetMoney
+.end_macro
+.macro	init_badge_list
+	li	$t0, 0
+	la	$t1, boulderBadge
+	sw	$t1, badgeList($t0)
+	addi	$t0, $t0, 4
+	la	$t1, cascadeBadge
+	sw	$t1, badgeList($t0)
+	addi	$t0, $t0, 4
+	la	$t1, thunderBadge
+	sw	$t1, badgeList($t0)
+	addi	$t0, $t0, 4
+	la	$t1, rainbowBadge
+	sw	$t1, badgeList($t0)
+	addi	$t0, $t0, 4
+	la	$t1, soulBadge
+	sw	$t1, badgeList($t0)
+	addi	$t0, $t0, 4
+	la	$t1, marshBadge
+	sw	$t1, badgeList($t0)
+	addi	$t0, $t0, 4
+	la	$t1, volcanoBadge
+	sw	$t1, badgeList($t0)
+	addi	$t0, $t0, 4
+	la	$t1, earthBadge
+	sw	$t1, badgeList($t0)	
+.end_macro
+.macro	change_badges
+	print_string(currentBadges)
+	jal	GetBadges
+	print_string(enterNewBadges)
+	scan_string(stringBuffer)
+	jal	StripNewLine
+	jal	SetBadges
+.end_macro
+.macro	change_items
+	print_string(currentItems)
+	jal	GetItems
+	print_string(enterNewItems)	
+	scan_string(stringBuffer)
+	jal	StripNewLine
+	jal	SetItems
+.end_macro
+main:	
+	init_ram_buffer
+	init_rom_buffer
+	init_badge_list
+#	change_name
+#	change_money
+#	change_badges
+	change_items
+	commit_ram_buffer
+	li	$v0, 10
+	syscall
+	
+#FUNCTIONS START HERE
 
 #print bytes in bytesBuffer
 PrintBytes:	push($ra)
@@ -276,19 +322,6 @@ SetNameElse:	li	$t1, 0x50
 SetNameBreak:	pop($ra)
 	jr	$ra
 
-#output current name, get input for new name, and change current name
-ChangeName:	push($ra)
-	jal	GetName
-	print_string(currentName)
-	print_string(stringBuffer)
-	
-	print_string(enterNewName)
-	scan_string(stringBuffer)
-	jal	StripNewLine
-	jal	SetName
-
-	pop($ra)
-	jr	$ra
 	
 #take BCD in a0 and outputs decimal equivalent in v0
 BcdToDecimal:	push($ra)
@@ -384,21 +417,6 @@ SetMoney:	push($ra)
 SetMoneyBreak:	pop($ra)
 	jr	$ra
 	
-#output current money, get input new money, change current money
-ChangeMoney:	push($ra)
-	push($s2)
-	jal	GetMoney
-	move	$s2, $v0
-	print_string(currentMoney)
-	print_int($s2)
-	
-	print_string(enterNewMoney)
-	scan_int($a0)
-	jal	SetMoney
-	pop($s2)
-	pop($ra)
-	jr	$ra
-	
 #initialize badgelist	
 InitBadgeList:	push($ra)
 	li	$t0, 0
@@ -469,16 +487,6 @@ SetBadgeBreak:	sb	$t3, ramBuffer+0x2602
 	pop($ra)
 	jr	$ra
 	
-#gets badges, prints them, takes input 8-bit string rep, changes badges
-ChangeBadges: 	push($ra)
-	print_string(currentBadges)
-	jal	GetBadges
-	print_string(enterNewBadges)
-	scan_string(stringBuffer)
-	jal	StripNewLine
-	jal	SetBadges
-	pop($ra)
-	jr	$ra
 	
 #decodes item id in a0 and stores item name in stringBuffer
 DecodeItem:	push($ra)
@@ -536,6 +544,20 @@ GetItemsLoop:	bgt	$t0, $t8, GetItemsBreak
 GetItemsBreak:	pop($ra)
 	jr	$ra
 
+
+#hex char to number
+HexToNumber:	push($ra)
+	push($t0)
+	move	$t0, $a0
+	bge	$t0, 'a', HexLetter	
+HexDigit:	subi	$v0, $t0, '0'
+	j	HexReturn
+HexLetter:	subi	$v0, $t0, 'a'
+	addi	$v0, $v0, 10
+HexReturn:	pop($t0)
+	pop($ra)
+	jr	$ra
+
 #set items based on <#> 0x<ID> <QTY> in stringBuffer	
 SetItems:	push($ra)
 	push($s0)
@@ -553,12 +575,14 @@ SetItems:	push($ra)
 	add	$s0, $s0, $t1
 	li	$t4, 1	
 SetItemId:	li	$s1, 0		#s1 = item id
-	lbu	$t1, stringBuffer+4($t4)
-	subi	$t1, $t1, '0'	
+	lbu	$a0, stringBuffer+4($t4)	#beq
+	jal	HexToNumber
+	move	$t1, $v0	
 	sll	$t1, $t1, 4
 	add	$s1, $s1, $t1		#add first byte hex
-	lbu	$t1, stringBuffer+5($t4)
-	subi	$t1, $t1, '0'
+	lbu	$a0, stringBuffer+5($t4)
+	jal	HexToNumber
+	move	$t1, $v0
 	add	$s1, $s1, $t1	 	#add second byte hex
 	
 	li	$s2, 0		#s2 = item qty
@@ -592,13 +616,3 @@ SetItemsReturn:	mul	$t0, $s0, 2
 	pop($ra)
 	jr	$ra
 	
-#Displays Items and allows editting of one of them afterwards
-ChangeItems:	push($ra)
-	print_string(currentItems)
-	jal	GetItems
-	print_string(enterNewItems)	
-	scan_string(stringBuffer)
-	jal	StripNewLine
-	jal	SetItems
-	pop($ra)
-	jr	$ra
