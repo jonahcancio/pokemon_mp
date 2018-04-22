@@ -17,20 +17,19 @@ decodeTionary:	.ascii	"^***************"	#0
 	.ascii	"***/,*0123456789"	#f
 stringBuffer:	.space	128
 bytesBuffer:	.space	128
+badgeList:	.space	32
 ramName:	.asciiz	"Pokemon Red (U) [S][BF].sav"
 ramBuffer:	.space	32768
 romName:	.asciiz	"Pokemon Red (U) [S][BF].gb"
 romBuffer:	.space	1048576
 
-checkSumString:	.asciiz	"Checksum: "
-fileErrorString:	.asciiz	"Error reading/writing file"
-currentName:	.asciiz	"Current Name: "
-enterNewName:	.asciiz	"\nPlease enter new name:\n"
-currentMoney:	.asciiz	"Current Money: "
-enterNewMoney:	.asciiz	"\nPlease enter new money:\n"
+checkSumString:	.asciiz	"#Checksum: "
+fileErrorString:	.asciiz	"#Error reading/writing file"
+currentName:	.asciiz	"#Current Name: "
+enterNewName:	.asciiz	"\n#Please enter new name:\n"
+currentMoney:	.asciiz	"#Current Money: "
+enterNewMoney:	.asciiz	"\n#Please enter new money:\n"
 
-dunderText:	.space	1
-badgeList:	.space	32
 boulderBadge:	.asciiz	"BOULDERBADGE"
 cascadeBadge:	.asciiz	"CASCADEBADGE"
 thunderBadge:	.asciiz	"THUNDERBADGE"
@@ -40,8 +39,10 @@ marshBadge:	.asciiz	"MARSHBADGE"
 volcanoBadge:	.asciiz	"VOLCANOBADGE"
 earthBadge:	.asciiz	"EARTHBADGE"
 noneString:	.asciiz	"NONE"
-currentBadges:	.asciiz	"Curren Badges:\n"
-enterNewBadges:	.asciiz	"\nPlease enter the 8-char binary string rep for your new badges:\n"
+currentBadges:	.asciiz	"#Curren Badges:\n"
+enterNewBadges:	.asciiz	"\n#Please enter the 8-char binary string rep for your new badges:\n"
+currentItems:	.asciiz	"#Current Items:\n"
+enterNewItems:	.asciiz	"\n#Please enter new item in format: <#> 0x<ID> <QTY>\n"
 .text
 .macro	print_int(%reg)
 	move	$a0, %reg
@@ -109,18 +110,23 @@ enterNewBadges:	.asciiz	"\nPlease enter the 8-char binary string rep for your ne
 	li	$v0, 16
 	syscall
 .end_macro
+.macro	init_ram_buffer
+	open_file(ramName, $s6, 0)
+	read_file(ramBuffer, $s6, 32768)
+	move	$t0, $v0
+	close_file($s6)
+	move	$v0, $t0
+.end_macro
+
 main:	
-	jal	InitRamBuffer
+	init_ram_buffer
 	jal	InitRomBuffer
 	jal	InitBadgeList
 #	jal	ChangeName
 #	jal	ChangeMoney
 #	jal	ChangeBadges
-#	jal	GetBadges
-	jal	GetItems
-#	li	$a0, 0
-#	jal	DecodeItem
-#	print_string(stringBuffer)
+	jal	ChangeItems
+	jal	CommitRamBuffer
 	li	$v0, 10
 	syscall
 	
@@ -135,6 +141,15 @@ InitRamBuffer:	push($ra)
 	pop($ra)
 	jr	$ra
 	
+#writes ramBuffer to file
+CommitRamBuffer:	push($ra)
+	jal	FixCheckSum
+	open_file(ramName, $s6, 1)
+	write_file(ramBuffer, $s6, 32768)
+	close_file($s6)
+	pop($ra)
+	jr	$ra
+
 #initialize ramBuffer
 InitRomBuffer:	push($ra)
 	open_file(romName, $s7, 0)
@@ -271,11 +286,7 @@ ChangeName:	push($ra)
 	scan_string(stringBuffer)
 	jal	StripNewLine
 	jal	SetName
-	jal	FixCheckSum
 
-	open_file(ramName, $s6, 1)
-	write_file(ramBuffer, $s6, 32768)
-	close_file($s6)
 	pop($ra)
 	jr	$ra
 	
@@ -384,11 +395,6 @@ ChangeMoney:	push($ra)
 	print_string(enterNewMoney)
 	scan_int($a0)
 	jal	SetMoney
-	jal	FixCheckSum
-	
-	open_file(ramName, $s6, 1)
-	write_file(ramBuffer, $s6, 32768)
-	close_file($s6)
 	pop($s2)
 	pop($ra)
 	jr	$ra
@@ -471,11 +477,6 @@ ChangeBadges: 	push($ra)
 	scan_string(stringBuffer)
 	jal	StripNewLine
 	jal	SetBadges
-	jal	FixCheckSum
-	
-	open_file(ramName, $s6, 1)
-	write_file(ramBuffer, $s6, 32768)
-	close_file($s6)
 	pop($ra)
 	jr	$ra
 	
@@ -533,4 +534,71 @@ GetItemsLoop:	bgt	$t0, $t8, GetItemsBreak
 	addi	$t0, $t0, 1
 	j	GetItemsLoop
 GetItemsBreak:	pop($ra)
+	jr	$ra
+
+#set items based on <#> 0x<ID> <QTY> in stringBuffer	
+SetItems:	push($ra)
+	push($s0)
+	push($s1)
+	push($s2)
+	li	$t4, 0		#t4 = itemcount is 2-digit number
+	li	$s0, 0		#s0 = item order in bag
+	lbu	$t1, stringBuffer
+	subi	$t1, $t1, '0'	
+	add	$s0, $s0, $t1
+	lbu	$t1, stringBuffer+1
+	beq	$t1, ' ', SetItemId		#skip digit shifting if item order is only 1-digit
+	subi	$t1, $t1, '0'
+	mul	$s0, $s0, 10
+	add	$s0, $s0, $t1
+	li	$t4, 1	
+SetItemId:	li	$s1, 0		#s1 = item id
+	lbu	$t1, stringBuffer+4($t4)
+	subi	$t1, $t1, '0'	
+	sll	$t1, $t1, 4
+	add	$s1, $s1, $t1		#add first byte hex
+	lbu	$t1, stringBuffer+5($t4)
+	subi	$t1, $t1, '0'
+	add	$s1, $s1, $t1	 	#add second byte hex
+	
+	li	$s2, 0		#s2 = item qty
+	addi	$t2, $t4, 7		#t2 = string offset
+	li	$t3, 1000		#t3 = multiplier/divider
+SetItemQtyLoop:	bge	$t2, 10, SetItemQtyBreak
+	lbu	$t1, stringBuffer($t2)
+	blt	$t1, '0', SetItemQtyBreak
+	bgt	$t1, '9', SetItemQtyBreak
+	subi	$t1, $t1, '0'
+	div	$t3, $t3, 10
+	mul	$t1, $t1, $t3
+	add	$s2, $s2, $t1
+	addi	$t2, $t2, 1
+	j	SetItemQtyLoop
+SetItemQtyBreak:	div	$s2, $s2, $t3		
+	lbu	$t1, ramBuffer+0x25c9	#t1 = total number of items count
+	ble	$s0, $t1, SetItemsReturn	# no need for appending if item # < max_item count
+AdjustItemK:	add	$s0, $t1, 1		#adjust s0 = max_items + 1
+	sb	$s0, ramBuffer+0x25c9
+	li	$t1, 0xff
+	mul	$t2, $s0, 2
+	sb	$t1, ramBuffer+0x25ca($t2)
+SetItemsReturn:	mul	$t0, $s0, 2		
+	addi	$t0, $t0, 0x25c8		#t0 = offset in ram = 0x25c8 + 2k
+	sb	$s1, ramBuffer($t0)
+	sb	$s2, ramBuffer+1($t0)
+	pop($s2)
+	pop($s1)
+	pop($s0)
+	pop($ra)
+	jr	$ra
+	
+#Displays Items and allows editting of one of them afterwards
+ChangeItems:	push($ra)
+	print_string(currentItems)
+	jal	GetItems
+	print_string(enterNewItems)	
+	scan_string(stringBuffer)
+	jal	StripNewLine
+	jal	SetItems
+	pop($ra)
 	jr	$ra
