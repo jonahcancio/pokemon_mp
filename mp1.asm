@@ -19,6 +19,8 @@ stringBuffer:	.space	128
 bytesBuffer:	.space	128
 ramName:	.asciiz	"Pokemon Red (U) [S][BF].sav"
 ramBuffer:	.space	32768
+romName:	.asciiz	"Pokemon Red (U) [S][BF].gb"
+romBuffer:	.space	1048576
 
 checkSumString:	.asciiz	"Checksum: "
 fileErrorString:	.asciiz	"Error reading/writing file"
@@ -27,6 +29,7 @@ enterNewName:	.asciiz	"\nPlease enter new name:\n"
 currentMoney:	.asciiz	"Current Money: "
 enterNewMoney:	.asciiz	"\nPlease enter new money:\n"
 
+dunderText:	.space	1
 badgeList:	.space	32
 boulderBadge:	.asciiz	"BOULDERBADGE"
 cascadeBadge:	.asciiz	"CASCADEBADGE"
@@ -108,11 +111,16 @@ enterNewBadges:	.asciiz	"\nPlease enter the 8-char binary string rep for your ne
 .end_macro
 main:	
 	jal	InitRamBuffer
+	jal	InitRomBuffer
 	jal	InitBadgeList
 #	jal	ChangeName
 #	jal	ChangeMoney
-	jal	ChangeBadges
-	jal	GetBadges
+#	jal	ChangeBadges
+#	jal	GetBadges
+	jal	GetItems
+#	li	$a0, 0
+#	jal	DecodeItem
+#	print_string(stringBuffer)
 	li	$v0, 10
 	syscall
 	
@@ -123,6 +131,16 @@ InitRamBuffer:	push($ra)
 	read_file(ramBuffer, $s6, 32768)
 	move	$t0, $v0
 	close_file($s6)
+	move	$v0, $t0
+	pop($ra)
+	jr	$ra
+	
+#initialize ramBuffer
+InitRomBuffer:	push($ra)
+	open_file(romName, $s7, 0)
+	read_file(romBuffer, $s7, 1048576)
+	move	$t0, $v0
+	close_file($s7)
 	move	$v0, $t0
 	pop($ra)
 	jr	$ra
@@ -459,4 +477,60 @@ ChangeBadges: 	push($ra)
 	write_file(ramBuffer, $s6, 32768)
 	close_file($s6)
 	pop($ra)
+	jr	$ra
+	
+#decodes item id in a0 and stores item name in stringBuffer
+DecodeItem:	push($ra)
+	push($s0)
+	push($t0)
+	push($t1)
+	push($t2)
+	subi	$s0, $a0, 1		#s0 = item id
+	li	$t0, 0x472b
+DecodeItemLoopF:	bge	$t0, 0x4a91, DecodeItemBreakF
+	blez	$s0, DecodeItemBreakF
+	lbu	$t1, romBuffer($t0)		#t1 = romByte at index t0
+	addi	$t0, $t0, 1
+	bne	$t1, 0x50, DecodeItemLoopF
+	subi	$s0, $s0, 1	
+	j	DecodeItemLoopF
+DecodeItemBreakF:	move	$s0, $t0		#s0 = ROM offset to read from
+	li	$t0, 0
+DecodeItemLoopR:	bge 	$t0, 0x4a91, DecodeItemBreakR
+	lbu	$t1, romBuffer($s0)
+	sb	$t1, bytesBuffer($t0)
+	beq	$t1, 0x50, DecodeItemBreakR
+	addi	$s0, $s0, 1
+	addi	$t0, $t0, 1
+	j	DecodeItemLoopR
+DecodeItemBreakR:	jal	DecodeBytes
+	pop($t2)
+	pop($t1)
+	pop($t0)
+	pop($s0)
+	pop($ra)
+	jr	$ra
+	
+#read items and prints a list of them in format: <#> <ITEM_NAME> x<QTY>
+GetItems:	push($ra)
+	li	$t0, 1		#t1 = item #
+	li	$t2, 0x25ca		#t2 = ram offset
+	lbu	$t8, ramBuffer+0x25c9	#t8 = distinct item count
+GetItemsLoop:	bgt	$t0, $t8, GetItemsBreak
+	print_int($t0)
+	print_char(' ')
+	lbu	$a0, ramBuffer($t2)		#a0 = item id	
+	jal	DecodeItem
+	print_string(stringBuffer)
+	print_char(' ')
+	print_char('x')
+	addi	$t2, $t2, 1
+
+	lbu	$a0, ramBuffer($t2)		#a0 = item qty
+	print_int($a0)
+	print_char('\n')
+	addi	$t2, $t2, 1
+	addi	$t0, $t0, 1
+	j	GetItemsLoop
+GetItemsBreak:	pop($ra)
 	jr	$ra
