@@ -45,6 +45,7 @@ enterNewBadges:	.asciiz	"#Please enter the 8-char binary string rep for your new
 currentItems:	.asciiz	"#Current Items:\n"
 enterNewItems:	.asciiz	"#Please enter new item in format: <#> 0x<ID> <QTY>\n"
 titlePokemon:	.asciiz	"#Title Pokemon Displayed:\n"
+notFound:	.asciiz	"NOT FOUND"
 .text
 .macro	print_int(%reg)
 	move	$a0, %reg
@@ -61,7 +62,12 @@ titlePokemon:	.asciiz	"#Title Pokemon Displayed:\n"
 	li	$v0, 34
 	syscall
 .end_macro
-.macro	print_char(%c)
+.macro	print_char(%reg)
+	move	$a0, %reg
+	li	$v0, 11
+	syscall
+.end_macro
+.macro	print_chari(%c)
 	li	$a0, %c
 	li	$v0, 11
 	syscall
@@ -203,17 +209,29 @@ titlePokemon:	.asciiz	"#Title Pokemon Displayed:\n"
 .macro	show_title_pokemon
 	jal	GetTitlePokemon
 .end_macro
+.macro	dialogue_search
+	scan_string(stringBuffer)
+	jal	StripNewLine
+	jal	DialogSearch	
+	bltz	$v0, Dialogue_None
+	move	$a0, $v0	
+	jal	PrintPlainHex
+	j	Dialogue_Out
+Dialogue_None:	print_string(notFound)
+Dialogue_Out:
+.end_macro
 main:	
-	init_ram_buffer
+#	init_ram_buffer
 	init_rom_buffer
-	init_badge_list
+#	init_badge_list
 #	change_name
 #	change_money
 #	change_badges
 #	change_items
 #	commit_ram_buffer
-	show_title_pokemon
+#	show_title_pokemon
 #	commit_rom_buffer
+	dialogue_search
 	li	$v0, 10
 	syscall
 	
@@ -225,11 +243,11 @@ PrintBytes:	push($ra)
 PrintBytesLoop:	bge	$t0, 128, PrintBytesBreak
 	lbu	$t1, bytesBuffer($t0)
 	beq	$t1, 0x50, PrintBytesBreak
-	print_char('\\')
+	print_chari('\\')
 	print_hex($t1)
 	addi	$t0, $t0, 1
 	j	PrintBytesLoop
-PrintBytesBreak:	print_char('\n')
+PrintBytesBreak:	print_chari('\n')
 	pop($ra)
 	jr	$ra
 	
@@ -297,10 +315,10 @@ CheckSumRamBreak:	nor	$t2, $t2, $t2
 	lbu	$t1, ramBuffer+0x3523
 	print_string(checkSumRamString)
 	print_int($t1)
-	print_char('=')
-	print_char('>')
+	print_chari('=')
+	print_chari('>')
 	print_int($t2)
-	print_char('\n')
+	print_chari('\n')
 	sb	$t2, ramBuffer+0x3523
 	pop($ra)
 	jr	$ra
@@ -323,10 +341,10 @@ CheckSumRomBreak:	lbu	$t3, romBuffer+0x14e
 	add	$t1, $t3, $t4
 	print_string(checkSumRomString)
 	print_int($t1)
-	print_char('=')
-	print_char('>')
+	print_chari('=')
+	print_chari('>')
 	print_int($t2)
-	print_char('\n')
+	print_chari('\n')
 	srl	$t3, $t2, 8
 	sb	$t3, romBuffer+0x14e
 	andi	$t4, $t2, 0x000000FF
@@ -504,13 +522,13 @@ GetBadgeLoop:	bge	$t0, 32, GetBadgeBreak
 	li	$v0, 4
 	syscall
 	addi	$t3, $t3, 1
-	print_char('\t')
+	print_chari('\t')
 GetBadgeNoPrint:	sll	$t2, $t2, 1
 	addi	$t0, $t0, 4
 	j	GetBadgeLoop
 GetBadgeBreak:	bnez	$t3, GetBadgeMeron
 	print_string(noneString)
-GetBadgeMeron:	print_char('\n')
+GetBadgeMeron:	print_chari('\n')
 	pop($ra)
 	jr	$ra
 
@@ -571,17 +589,17 @@ GetItems:	push($ra)
 	lbu	$t8, ramBuffer+0x25c9	#t8 = distinct item count
 GetItemsLoop:	bgt	$t0, $t8, GetItemsBreak
 	print_int($t0)
-	print_char(' ')
+	print_chari(' ')
 	lbu	$a0, ramBuffer($t2)		#a0 = item id	
 	jal	DecodeItem
 	print_string(stringBuffer)
-	print_char(' ')
-	print_char('x')
+	print_chari(' ')
+	print_chari('x')
 	addi	$t2, $t2, 1
 
 	lbu	$a0, ramBuffer($t2)		#a0 = item qty
 	print_int($a0)
-	print_char('\n')
+	print_chari('\n')
 	addi	$t2, $t2, 1
 	addi	$t0, $t0, 1
 	j	GetItemsLoop
@@ -694,14 +712,85 @@ GetTitlePokemon:	push($ra)
 	lbu	$a0, romBuffer+0x4399
 	jal	DecodePokemon
 	print_string(stringBuffer)
-	print_char('\n')
+	print_chari('\n')
 	li	$t0, 0x4588
 GetTitlePokeLoop:	bge	$t0, 0x4598, GetTitlePokeBreak
 	lbu	$a0, romBuffer($t0)
 	jal	DecodePokemon
 	print_string(stringBuffer)
-	print_char('\n')
+	print_chari('\n')
 	addi	$t0, $t0, 1
 	j	GetTitlePokeLoop
 GetTitlePokeBreak:	pop($ra)
+	jr	$ra
+
+
+#print decimal in a0 as hex without its leading zeros
+PrintPlainHex:	push($ra)
+	push($s0)
+	push($t0)
+	push($t1)
+	push($t2)
+	push($t3)
+	move	$s0, $a0		#s0 = original number
+	print_chari('0')
+	print_chari('x')
+	li	$t0, 28		#t0 = shift right amount
+	li	$t3, 1		#t3 = isDigitLeadingZero
+	li	$t2, 0xF0000000		#t2 = digit mask
+PlainHexLoop:	bltz	$t0, PlainHexBreak
+	and	$t1, $s0, $t2	
+	srlv	$t1, $t1, $t0		#t1 = hex digit
+	beqz	$t3, PlainHexPrint		#if digit no longer leading zero
+	slti	$t3, $t1, 1
+	bnez	$t3, PlainHexUpdate	
+PlainHexPrint:	bge	$t1, 10, PlainHexLetter
+PlainHexNumber:	print_int($t1)
+	j	PlainHexUpdate
+PlainHexLetter:	add	$t1, $t1, 'a'
+	subi	$t1, $t1, 10
+	print_char($t1)
+PlainHexUpdate:	subi	$t0, $t0, 4
+	srl	$t2, $t2, 4
+	j	PlainHexLoop
+PlainHexBreak:	pop($t3)
+	pop($t2)
+	pop($t1)
+	pop($t0)
+	pop($s0)
+	pop($ra)
+	jr	$ra
+
+#search dialog of stringBuffer inside romBuffer
+DialogSearch:	push($ra)
+	push($s0)
+	push($t0)
+	push($t1)
+	push($t2)
+	push($t3)
+	push($t4)
+	jal	EncodeString
+	li	$t0, 0		#t0 = romBuffer offset 
+DialogSearchLoopS:	bge	$t0, 1048576, DialogSearchNone
+	li	$t2, 0		#t2 = stringBuffer offset
+DialogSearchLoopV:	bge	$t2, 30, DialogSearchFound
+	lbu	$t1, bytesBuffer($t2)	#t1 = byteBuffer byte
+	add	$t4, $t0, $t2		#t4 = total romBuffer offset
+	lbu	$t3, romBuffer($t4)		#t3 = romBuffer byte
+	beq	$t1, 0x50, DialogSearchFound	#if end of string reached, dialog found
+	bne	$t1, $t3, DialogSearchWrong	#if not mismatch, continue loop in DialogSearchWrong
+	addi	$t2, $t2, 1
+	j	DialogSearchLoopV
+DialogSearchWrong:	addi	$t0, $t0, 1
+	j	DialogSearchLoopS
+DialogSearchFound:	move	$v0, $t0		#return address offset if found
+	j	DialogSearchReturn
+DialogSearchNone:	li	$v0, -1		#return -1 if none found
+DialogSearchReturn:	pop($t4)
+	pop($t3)
+	pop($t2)
+	pop($t1)
+	pop($t0)
+	pop($s0)
+	pop($ra)
 	jr	$ra
