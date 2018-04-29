@@ -23,11 +23,12 @@ ramBuffer:	.space	32768
 romName:	.asciiz	"Pokemon Red (U) [S][BF].gb"
 romBuffer:	.space	1048576
 
-checkSumString:	.asciiz	"#Checksum: "
+checkSumRamString:	.asciiz	"#Checksum (RAM): "
+checkSumRomString:	.asciiz	"#Checksum (ROM): "
 fileErrorString:	.asciiz	"#Error reading/writing file"
-currentName:	.asciiz	"#Current Name: "
+currentName:	.asciiz	"#Current Name:\n"
 enterNewName:	.asciiz	"\n#Please enter new name:\n"
-currentMoney:	.asciiz	"#Current Money: "
+currentMoney:	.asciiz	"#Current Money:\n"
 enterNewMoney:	.asciiz	"\n#Please enter new money:\n"
 
 boulderBadge:	.asciiz	"BOULDERBADGE"
@@ -39,10 +40,11 @@ marshBadge:	.asciiz	"MARSHBADGE"
 volcanoBadge:	.asciiz	"VOLCANOBADGE"
 earthBadge:	.asciiz	"EARTHBADGE"
 noneString:	.asciiz	"NONE"
-currentBadges:	.asciiz	"#Curren Badges:\n"
-enterNewBadges:	.asciiz	"\n#Please enter the 8-char binary string rep for your new badges:\n"
+currentBadges:	.asciiz	"#Current Badges:\n"
+enterNewBadges:	.asciiz	"#Please enter the 8-char binary string rep for your new badges:\n"
 currentItems:	.asciiz	"#Current Items:\n"
-enterNewItems:	.asciiz	"\n#Please enter new item in format: <#> 0x<ID> <QTY>\n"
+enterNewItems:	.asciiz	"#Please enter new item in format: <#> 0x<ID> <QTY>\n"
+titlePokemon:	.asciiz	"#Title Pokemon Displayed:\n"
 .text
 .macro	print_int(%reg)
 	move	$a0, %reg
@@ -118,7 +120,7 @@ enterNewItems:	.asciiz	"\n#Please enter new item in format: <#> 0x<ID> <QTY>\n"
 	move	$v0, $t0
 .end_macro
 .macro	commit_ram_buffer
-	jal	FixCheckSum
+	jal	FixCheckSumRam
 	open_file(ramName, $s6, 1)
 	write_file(ramBuffer, $s6, 32768)
 	close_file($s6)
@@ -129,6 +131,12 @@ enterNewItems:	.asciiz	"\n#Please enter new item in format: <#> 0x<ID> <QTY>\n"
 	move	$t0, $v0
 	close_file($s7)
 	move	$v0, $t0
+.end_macro
+.macro	commit_rom_buffer
+	jal	FixCheckSumRom
+	open_file(romName, $s7, 1)
+	write_file(romBuffer, $s7, 1048576)
+	close_file($s7)
 .end_macro
 .macro	change_name
 	jal	GetName
@@ -192,6 +200,9 @@ enterNewItems:	.asciiz	"\n#Please enter new item in format: <#> 0x<ID> <QTY>\n"
 	jal	StripNewLine
 	jal	SetItems
 .end_macro
+.macro	show_title_pokemon
+	jal	GetTitlePokemon
+.end_macro
 main:	
 	init_ram_buffer
 	init_rom_buffer
@@ -199,8 +210,10 @@ main:
 #	change_name
 #	change_money
 #	change_badges
-	change_items
-	commit_ram_buffer
+#	change_items
+#	commit_ram_buffer
+	show_title_pokemon
+#	commit_rom_buffer
 	li	$v0, 10
 	syscall
 	
@@ -269,20 +282,20 @@ EncodeBreak:	li	$t2, 0x50
 	pop($ra)
 	jr	$ra
 	
-#computes checksum and assigns it to address 0x3523
-FixCheckSum:	push($ra)
+#computes checksum of RAM and assigns it to address 0x3523
+FixCheckSumRam:	push($ra)
 	li	$t0, 0x2598
 	li	$t2, 0
-CheckSumLoop:	bge	$t0, 0x3523, CheckSumBreak
+CheckSumRamLoop:	bge	$t0, 0x3523, CheckSumRamBreak
 	lbu	$t1, ramBuffer($t0)
 	add	$t2, $t2, $t1
 	andi	$t2, $t2, 0x000000FF
 	addi	$t0, $t0, 1
-	j	CheckSumLoop
-CheckSumBreak:	nor	$t2, $t2, $t2
+	j	CheckSumRamLoop
+CheckSumRamBreak:	nor	$t2, $t2, $t2
 	andi	$t2, $t2, 0x000000FF
 	lbu	$t1, ramBuffer+0x3523
-	print_string(checkSumString)
+	print_string(checkSumRamString)
 	print_int($t1)
 	print_char('=')
 	print_char('>')
@@ -291,6 +304,37 @@ CheckSumBreak:	nor	$t2, $t2, $t2
 	sb	$t2, ramBuffer+0x3523
 	pop($ra)
 	jr	$ra
+	
+#computes checksum of RoM and assigns it to address 0x3523
+FixCheckSumRom:	push($ra)
+	li	$t0, 0
+	li	$t2, 0
+CheckSumRomLoop:	bge	$t0, 1048576, CheckSumRomBreak
+	beq	$t0, 0x14e, CheckSumRomUpdate
+	beq	$t0, 0x14f, CheckSumRomUpdate
+	lbu	$t1, romBuffer($t0)
+	add	$t2, $t2, $t1
+	andi	$t2, $t2, 0x0000FFFF
+CheckSumRomUpdate:	addi	$t0, $t0, 1
+	j	CheckSumRomLoop
+CheckSumRomBreak:	lbu	$t3, romBuffer+0x14e
+	lbu	$t4, romBuffer+0x14f
+	sll	$t3, $t3, 8
+	add	$t1, $t3, $t4
+	print_string(checkSumRomString)
+	print_int($t1)
+	print_char('=')
+	print_char('>')
+	print_int($t2)
+	print_char('\n')
+	srl	$t3, $t2, 8
+	sb	$t3, romBuffer+0x14e
+	andi	$t4, $t2, 0x000000FF
+	sb	$t4, romBuffer+0x14f 
+	pop($ra)
+	jr	$ra	
+	
+	
 	
 #reads name from ramBuffer into bytesBuffer, decodes into stringBuffer, 
 GetName:	push($ra)
@@ -522,7 +566,7 @@ DecodeItemBreakR:	jal	DecodeBytes
 	
 #read items and prints a list of them in format: <#> <ITEM_NAME> x<QTY>
 GetItems:	push($ra)
-	li	$t0, 1		#t1 = item #
+	li	$t0, 1		#t1 = item # in bag
 	li	$t2, 0x25ca		#t2 = ram offset
 	lbu	$t8, ramBuffer+0x25c9	#t8 = distinct item count
 GetItemsLoop:	bgt	$t0, $t8, GetItemsBreak
@@ -615,4 +659,49 @@ SetItemsReturn:	mul	$t0, $s0, 2
 	pop($s0)
 	pop($ra)
 	jr	$ra
-	
+
+
+#Decodes pokemon at address in $a0
+DecodePokemon:	push($ra)
+	push($s0)
+	push($t0)
+	push($t1)
+	push($t2)
+	subi	$s0, $a0, 1		#s0 = pokemon id
+	mul	$t2, $s0, 10
+	add	$t2, $t2, 0x1c21e		#t2 = ROM offset to read from					
+	li	$t0, 0
+DecodePokeLoopR:	bge 	$t0, 10, DecodePokeBreakR	#loop copies romBuffer to byteBuffer
+	lbu	$t1, romBuffer($t2)		#t1 = romByte at index t0
+	sb	$t1, bytesBuffer($t0)
+	beq	$t1, 0x50, DecodePokeBreakR
+	addi	$t2, $t2, 1
+	addi	$t0, $t0, 1
+	j	DecodePokeLoopR
+DecodePokeBreakR:	li	$t1, 0x50
+	sb	$t1, bytesBuffer($t0)
+	jal	DecodeBytes
+	pop($t2)
+	pop($t1)
+	pop($t0)
+	pop($s0)
+	pop($ra)
+	jr	$ra
+
+#prints out every title pokemon in order of ROM placement
+GetTitlePokemon:	push($ra)
+	print_string(titlePokemon)
+	lbu	$a0, romBuffer+0x4399
+	jal	DecodePokemon
+	print_string(stringBuffer)
+	print_char('\n')
+	li	$t0, 0x4588
+GetTitlePokeLoop:	bge	$t0, 0x4598, GetTitlePokeBreak
+	lbu	$a0, romBuffer($t0)
+	jal	DecodePokemon
+	print_string(stringBuffer)
+	print_char('\n')
+	addi	$t0, $t0, 1
+	j	GetTitlePokeLoop
+GetTitlePokeBreak:	pop($ra)
+	jr	$ra
