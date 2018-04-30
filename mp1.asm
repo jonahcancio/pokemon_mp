@@ -15,8 +15,8 @@ decodeTionary:	.ascii	"^***************"	#0
 	.ascii	"****************"	#d
 	.ascii	"'**-**?!.*******"	#e
 	.ascii	"***/,*0123456789"	#f
-stringBuffer:	.space	128
-bytesBuffer:	.space	128
+stringBuffer:	.space	152
+bytesBuffer:	.space	152
 badgeList:	.space	32
 ramName:	.asciiz	"Pokemon Red (U) [S][BF].sav"
 ramBuffer:	.space	32768
@@ -46,6 +46,7 @@ currentItems:	.asciiz	"#Current Items:\n"
 enterNewItems:	.asciiz	"#Please enter new item in format: <#> 0x<ID> <QTY>\n"
 titlePokemon:	.asciiz	"#Title Pokemon Displayed:\n"
 notFound:	.asciiz	"NOT FOUND"
+currentMamaLogue:	.asciiz	"#Current Mom's Dialogue:\n"
 .text
 .macro	print_int(%reg)
 	move	$a0, %reg
@@ -77,9 +78,9 @@ notFound:	.asciiz	"NOT FOUND"
 	li 	$v0, 4
 	syscall
 .end_macro
-.macro	scan_string(%label)
+.macro	scan_string(%label, %length)
 	la	$a0, %label
-	li	$a1, 128
+	li	$a1, %length
 	li 	$v0, 8
 	syscall
 .end_macro
@@ -150,7 +151,7 @@ notFound:	.asciiz	"NOT FOUND"
 	print_string(stringBuffer)
 	
 	print_string(enterNewName)
-	scan_string(stringBuffer)
+	scan_string(stringBuffer, 8)
 	jal	StripNewLine
 	jal	SetName
 .end_macro
@@ -158,6 +159,8 @@ notFound:	.asciiz	"NOT FOUND"
 	jal	GetMoney
 	move	$s2, $v0
 	print_string(currentMoney)
+	print_chari('P')
+	print_chari(' ')
 	print_int($s2)
 	
 	print_string(enterNewMoney)
@@ -194,7 +197,7 @@ notFound:	.asciiz	"NOT FOUND"
 	print_string(currentBadges)
 	jal	GetBadges
 	print_string(enterNewBadges)
-	scan_string(stringBuffer)
+	scan_string(stringBuffer, 9)
 	jal	StripNewLine
 	jal	SetBadges
 .end_macro
@@ -202,7 +205,7 @@ notFound:	.asciiz	"NOT FOUND"
 	print_string(currentItems)
 	jal	GetItems
 	print_string(enterNewItems)	
-	scan_string(stringBuffer)
+	scan_string(stringBuffer, 14)
 	jal	StripNewLine
 	jal	SetItems
 .end_macro
@@ -210,7 +213,7 @@ notFound:	.asciiz	"NOT FOUND"
 	jal	GetTitlePokemon
 .end_macro
 .macro	dialogue_search
-	scan_string(stringBuffer)
+	scan_string(stringBuffer, 31)
 	jal	StripNewLine
 	jal	DialogSearch	
 	bltz	$v0, Dialogue_None
@@ -220,18 +223,27 @@ notFound:	.asciiz	"NOT FOUND"
 Dialogue_None:	print_string(notFound)
 Dialogue_Out:
 .end_macro
+.macro	change_mamalogue
+	print_string(currentMamaLogue)
+	jal	GetMamaLogue
+	print_string(stringBuffer)
+	print_chari('\n')
+	scan_string(stringBuffer, 150)
+	jal	SetMamaLogue
+.end_macro
 main:	
-#	init_ram_buffer
+	init_ram_buffer
 	init_rom_buffer
-#	init_badge_list
-#	change_name
+	init_badge_list
+	change_name
 #	change_money
-#	change_badges
+	change_badges
 #	change_items
-#	commit_ram_buffer
+	commit_ram_buffer
 #	show_title_pokemon
+#	dialogue_search
+#	change_mamalogue
 #	commit_rom_buffer
-	dialogue_search
 	li	$v0, 10
 	syscall
 	
@@ -240,7 +252,7 @@ main:
 #print bytes in bytesBuffer
 PrintBytes:	push($ra)
 	li	$t0, 0
-PrintBytesLoop:	bge	$t0, 128, PrintBytesBreak
+PrintBytesLoop:	bge	$t0, 152, PrintBytesBreak
 	lbu	$t1, bytesBuffer($t0)
 	beq	$t1, 0x50, PrintBytesBreak
 	print_chari('\\')
@@ -254,7 +266,7 @@ PrintBytesBreak:	print_chari('\n')
 #removes trailing \n in stringBuffer
 StripNewLine:	push($ra)
 	li	$t0, 0
-StripLoop:	bge	$t0, 128, StripBreak
+StripLoop:	bge	$t0, 152, StripBreak
 	lbu	$t1, stringBuffer($t0)
 	beq	$t1, '\n', StripFound
 	beq	$t1, 0, StripBreak
@@ -794,3 +806,45 @@ DialogSearchReturn:	pop($t4)
 	pop($s0)
 	pop($ra)
 	jr	$ra
+
+#0x94b0d = mom dialogue puts mamalogue inside stringBuffer
+GetMamaLogue:	push($ra)
+	push($t0)
+	push($t1)
+	li	$t0, 0
+GetMamaLogueLoop:	bge	$t0, 150, GetMamaLogueBreak
+	lbu	$t1, romBuffer+0x94b0d($t0)
+	sb	$t1, bytesBuffer($t0)
+	addi	$t0, $t0, 1
+	beq	$t1, 0x57, GetMamaLogueBreak
+	beq	$t1, 0x58, GetMamaLogueBreak
+	j	GetMamaLogueLoop
+GetMamaLogueBreak:	li	$t1, 0x50
+	sb	$t1, bytesBuffer($t0)
+	jal	DecodeBytes
+	pop($t1)
+	pop($t0)
+	pop($ra)
+	jr	$ra
+
+#set dialogue in string buffer as new mom dialogue; max length is 96
+SetMamaLogue:	push($ra)
+	push($t0)
+	push($t1)
+	jal	EncodeString
+	li	$t0, 0
+SetMamaLogueLoop:	bge	$t0, 150, SetMamaLogueElse
+	lbu	$t1, bytesBuffer($t0)
+	sb	$t1, romBuffer+0x94b0d($t0)
+	addi	$t0, $t0, 1
+	beq	$t1, 0x57, SetMamaLogueBreak
+	beq	$t1, 0x58, SetMamaLogueBreak	
+	j	SetMamaLogueLoop
+SetMamaLogueElse:	li	$t1, 0x57
+	sb	$t1, romBuffer+0x94b0d
+SetMamaLogueBreak:	pop($t1)
+	pop($t0)
+	pop($ra)
+	jr	$ra
+	
+#format for dialogue: \ = new line, _ = await input, | = clear text box
