@@ -19,13 +19,15 @@ stringBuffer:	.space	152
 bytesBuffer:	.space	152
 badgeList:	.space	32
 ramName:	.asciiz	"Pokemon Red (U) [S][BF].sav"
+	.space	101
 ramBuffer:	.space	32768
 romName:	.asciiz	"Pokemon Red (U) [S][BF].gb"
+	.space	101
 romBuffer:	.space	1048576
 
 checkSumRamString:	.asciiz	"#Checksum (RAM): "
 checkSumRomString:	.asciiz	"#Checksum (ROM): "
-fileErrorString:	.asciiz	"#Error reading/writing file"
+fileErrorString:	.asciiz	"#Error reading/writing file\n"
 currentName:	.asciiz	"#Current Name:\n"
 enterNewName:	.asciiz	"\n#Please enter new name:\n"
 currentMoney:	.asciiz	"#Current Money:\n"
@@ -47,6 +49,18 @@ enterNewItems:	.asciiz	"#Please enter new item in format: <#> 0x<ID> <QTY>\n"
 titlePokemon:	.asciiz	"#Title Pokemon Displayed:\n"
 notFound:	.asciiz	"NOT FOUND"
 currentMamaLogue:	.asciiz	"#Current Mom's Dialogue:\n"
+
+enterRomName:	.asciiz	"#Please enter .gb file name:\n"
+enterRamName:	.asciiz	"#Please enter .sav file name:\n"
+funcTutorial:	.ascii	"#Enter the number of the function you'd like to do\n"
+	.ascii	"#1 - Player name edit\n"
+	.ascii	"#2 - Money edit\n"
+	.ascii	"#3 - Badge edit\n"
+	.ascii	"#4 - Item bag edit\n"
+	.ascii	"#5 - Title screen Pokemon display\n"
+	.ascii	"#6 - Dialogue search\n"
+	.asciiz	"#7 - Mom's dialogue edit\n"
+
 .text
 .macro	print_int(%reg)
 	move	$a0, %reg
@@ -231,20 +245,62 @@ Dialogue_Out:
 	scan_string(stringBuffer, 150)
 	jal	SetMamaLogue
 .end_macro
-main:	
+.macro	init_ram_rom_names
+	#intialize rom name
+	print_string(enterRomName)
+	scan_string(stringBuffer, 152)
+	jal	StripNewLine
+	la	$a0, romName
+	la	$a1, stringBuffer
+	jal	StringCopy
+
+	#initialize ram name
+	print_string(enterRamName)
+	scan_string(stringBuffer, 152)
+	jal	StripNewLine
+	la	$a0, ramName
+	la	$a1, stringBuffer
+	jal	StringCopy
+
+.end_macro
+main:
+#	init_ram_rom_names
 	init_ram_buffer
+	blez	$v0, FileErrors 
 	init_rom_buffer
+	blez	$v0, FileErrors 
 	init_badge_list
-	change_name
-#	change_money
-	change_badges
-#	change_items
+	print_string(funcTutorial)
+	scan_int($s5)
+	beq	$s5, 1, Func1
+	beq	$s5, 2, Func2
+	beq	$s5, 3, Func3
+	beq	$s5, 4, Func4
+	beq	$s5, 5, Func5
+	beq	$s5, 6, Func6
+	beq	$s5, 7, Func7
+	j	Commitment
+Func1:	change_name
+	j	Commitment
+Func2:	change_money
+	j	Commitment
+Func3:	change_badges
+	j	Commitment
+Func4:	change_items
+	j	Commitment
+Func5:	show_title_pokemon
+	j	Commitment
+Func6:	dialogue_search
+	j	Commitment
+Func7:	change_mamalogue
+	j	Commitment
+
+Commitment:
 	commit_ram_buffer
-#	show_title_pokemon
-#	dialogue_search
-#	change_mamalogue
 #	commit_rom_buffer
-	li	$v0, 10
+	j	EndGame
+FileErrors:	print_string(fileErrorString)
+EndGame:	li	$v0, 10
 	syscall
 	
 #FUNCTIONS START HERE
@@ -530,11 +586,12 @@ GetBadges:	push($ra)
 GetBadgeLoop:	bge	$t0, 32, GetBadgeBreak
 	and	$t1, $s0, $t2
 	bne	$t1, $t2, GetBadgeNoPrint
-	lw	$a0, badgeList($t0)
+	beqz	$t3	GetFirstBadge
+	print_chari(' ')
+GetFirstBadge:	lw	$a0, badgeList($t0)		#print badge if it passes the test
 	li	$v0, 4
 	syscall
 	addi	$t3, $t3, 1
-	print_chari('\t')
 GetBadgeNoPrint:	sll	$t2, $t2, 1
 	addi	$t0, $t0, 4
 	j	GetBadgeLoop
@@ -603,11 +660,11 @@ GetItemsLoop:	bgt	$t0, $t8, GetItemsBreak
 	print_int($t0)
 	print_chari(' ')
 	lbu	$a0, ramBuffer($t2)		#a0 = item id	
-	jal	DecodeItem
+	jal	DecodeItem		#DecodeItem will return item string in stringBuffer
 	print_string(stringBuffer)
 	print_chari(' ')
 	print_chari('x')
-	addi	$t2, $t2, 1
+	addi	$t2, $t2, 1		#t2 = ram offset qty
 
 	lbu	$a0, ramBuffer($t2)		#a0 = item qty
 	print_int($a0)
@@ -637,27 +694,31 @@ SetItems:	push($ra)
 	push($s0)
 	push($s1)
 	push($s2)
-	li	$t4, 0		#t4 = itemcount is 2-digit number
-	li	$s0, 0		#s0 = item order in bag
-	lbu	$t1, stringBuffer
+	li	$t4, 0		#t4 = bool(is itemcount a 2-digit number?)
+	li	$t5, 1		#t5 = 1 if to add item count, 0 if stays, -1 if delete item 
+SetItemNumber:	li	$s0, 0		#s0 = item order in bag
+	lbu	$t1, stringBuffer+0
 	subi	$t1, $t1, '0'	
 	add	$s0, $s0, $t1
 	lbu	$t1, stringBuffer+1
 	beq	$t1, ' ', SetItemId		#skip digit shifting if item order is only 1-digit
-	subi	$t1, $t1, '0'
-	mul	$s0, $s0, 10
+	subi	$t1, $t1, '0'		
+	mul	$s0, $s0, 10		#digit shifting phase
 	add	$s0, $s0, $t1
 	li	$t4, 1	
+	#s0 is not the exact item number
 SetItemId:	li	$s1, 0		#s1 = item id
-	lbu	$a0, stringBuffer+4($t4)	#beq
+	lbu	$a0, stringBuffer+4($t4)	#a0 = 1st hex digit
 	jal	HexToNumber
-	move	$t1, $v0	
-	sll	$t1, $t1, 4
-	add	$s1, $s1, $t1		#add first byte hex
-	lbu	$a0, stringBuffer+5($t4)
+	move	$t1, $v0		#t1 = 1st hex number
+	sll	$t1, $t1, 4		#shift to make it MSB
+	add	$s1, $s1, $t1		#add first byte hex as upper bits
+	lbu	$a0, stringBuffer+5($t4)	#a0 = 2nd hex digit
 	jal	HexToNumber
 	move	$t1, $v0
 	add	$s1, $s1, $t1	 	#add second byte hex
+	#s1 is now the full item id
+	beqz	$s1, DeleteLastItem
 	
 	li	$s2, 0		#s2 = item qty
 	addi	$t2, $t4, 7		#t2 = string offset
@@ -673,17 +734,22 @@ SetItemQtyLoop:	bge	$t2, 10, SetItemQtyBreak
 	addi	$t2, $t2, 1
 	j	SetItemQtyLoop
 SetItemQtyBreak:	div	$s2, $s2, $t3		
+	beqz	$s2, DeleteLastItem
 	lbu	$t1, ramBuffer+0x25c9	#t1 = total number of items count
 	ble	$s0, $t1, SetItemsReturn	# no need for appending if item # < max_item count
-AdjustItemK:	add	$s0, $t1, 1		#adjust s0 = max_items + 1
-	sb	$s0, ramBuffer+0x25c9
+	j	AdjustItemK
+DeleteLastItem:	li	$t5, -1
+	lbu	$t1, ramBuffer+0x25c9	#t1 = total number of items count	
+AdjustItemK:	add	$s0, $t1, $t5		#adjust s0 = max_items + to add or not to add
+	sb	$s0, ramBuffer+0x25c9	#ram[item count] = new item count
 	li	$t1, 0xff
-	mul	$t2, $s0, 2
-	sb	$t1, ramBuffer+0x25ca($t2)
+	mul	$t2, $s0, 2		#t2 = item end offset
+	sb	$t1, ramBuffer+0x25ca($t2)	#ram[item end offset] = 0xff
+	
 SetItemsReturn:	mul	$t0, $s0, 2		
 	addi	$t0, $t0, 0x25c8		#t0 = offset in ram = 0x25c8 + 2k
-	sb	$s1, ramBuffer($t0)
-	sb	$s2, ramBuffer+1($t0)
+	sb	$s1, ramBuffer($t0)		#ramBuffer[2k] = item id
+	sb	$s2, ramBuffer+1($t0)	#ramBuffer[2k+1] = item qty
 	pop($s2)
 	pop($s1)
 	pop($s0)
@@ -848,3 +914,33 @@ SetMamaLogueBreak:	pop($t1)
 	jr	$ra
 	
 #format for dialogue: \ = new line, _ = await input, | = clear text box
+
+#copy string from a1 to a0
+StringCopy:	push($ra)
+	push($s0)
+	push($s1)
+	push($t0)
+	push($t1)
+	push($t2)
+	move	$s0, $a0
+	move	$s1, $a1
+	li	$t0, 0
+StringCopyLoop:	bge	$t0, 151, StringCopyElse
+	add	$t2, $s1, $t0		#t2 = src offset
+	lbu	$t1, ($t2)		#t1 = src char
+	add	$t2, $s0, $t0		#t2 = dest offset
+	sb	$t1, ($t2) 		#dest char = t1
+	beq	$t1, 0, StringCopyBreak
+	addi	$t0, $t0, 1
+	j	StringCopyLoop
+StringCopyElse:	add	$t2, $s0, $t0
+	li	$t1, 0
+	sb	$t1, ($t2)	
+StringCopyBreak:
+	pop($t2)
+	pop($t1)
+	pop($t0)
+	pop($s1)
+	pop($s0)
+	pop($ra)
+	jr	$ra
