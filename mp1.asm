@@ -46,6 +46,7 @@ currentBadges:	.asciiz	"#Current Badges:\n"
 enterNewBadges:	.asciiz	"#Please enter the 8-char binary string rep for your new badges:\n"
 currentItems:	.asciiz	"#Current Items:\n"
 enterNewItems:	.asciiz	"#Please enter new item in format: <#> 0x<ID> <QTY>\n"
+emptyItems:	.asciiz	"EMPTY"
 titlePokemon:	.asciiz	"#Title Pokemon Displayed:\n"
 notFound:	.asciiz	"NOT FOUND"
 currentMamaLogue:	.asciiz	"#Current Mom's Dialogue:\n"
@@ -655,7 +656,8 @@ DecodeItemBreakR:	jal	DecodeBytes
 GetItems:	push($ra)
 	li	$t0, 1		#t1 = item # in bag
 	li	$t2, 0x25ca		#t2 = ram offset
-	lbu	$t8, ramBuffer+0x25c9	#t8 = distinct item count
+	lbu	$t8, ramBuffer+0x25c9	#t8 = total item count
+	beqz	$t8, GetItemsEmpty
 GetItemsLoop:	bgt	$t0, $t8, GetItemsBreak
 	print_int($t0)
 	print_chari(' ')
@@ -672,6 +674,8 @@ GetItemsLoop:	bgt	$t0, $t8, GetItemsBreak
 	addi	$t2, $t2, 1
 	addi	$t0, $t0, 1
 	j	GetItemsLoop
+GetItemsEmpty:	print_string(emptyItems)
+	print_chari('\n')
 GetItemsBreak:	pop($ra)
 	jr	$ra
 
@@ -695,7 +699,6 @@ SetItems:	push($ra)
 	push($s1)
 	push($s2)
 	li	$t4, 0		#t4 = bool(is itemcount a 2-digit number?)
-	li	$t5, 1		#t5 = 1 if to add item count, 0 if stays, -1 if delete item 
 SetItemNumber:	li	$s0, 0		#s0 = item order in bag
 	lbu	$t1, stringBuffer+0
 	subi	$t1, $t1, '0'	
@@ -706,7 +709,7 @@ SetItemNumber:	li	$s0, 0		#s0 = item order in bag
 	mul	$s0, $s0, 10		#digit shifting phase
 	add	$s0, $s0, $t1
 	li	$t4, 1	
-	#s0 is not the exact item number
+	#s0 is now the complete item number
 SetItemId:	li	$s1, 0		#s1 = item id
 	lbu	$a0, stringBuffer+4($t4)	#a0 = 1st hex digit
 	jal	HexToNumber
@@ -717,9 +720,7 @@ SetItemId:	li	$s1, 0		#s1 = item id
 	jal	HexToNumber
 	move	$t1, $v0
 	add	$s1, $s1, $t1	 	#add second byte hex
-	#s1 is now the full item id
-	beqz	$s1, DeleteLastItem
-	
+	#s1 is now the complete item id	
 	li	$s2, 0		#s2 = item qty
 	addi	$t2, $t4, 7		#t2 = string offset
 	li	$t3, 1000		#t3 = multiplier/divider
@@ -733,24 +734,30 @@ SetItemQtyLoop:	bge	$t2, 10, SetItemQtyBreak
 	add	$s2, $s2, $t1
 	addi	$t2, $t2, 1
 	j	SetItemQtyLoop
-SetItemQtyBreak:	div	$s2, $s2, $t3		
-	beqz	$s2, DeleteLastItem
+SetItemQtyBreak:	div	$s2, $s2, $t3
+	#s2 is now the complete item qty
 	lbu	$t1, ramBuffer+0x25c9	#t1 = total number of items count
-	ble	$s0, $t1, SetItemsReturn	# no need for appending if item # < max_item count
-	j	AdjustItemK
-DeleteLastItem:	li	$t5, -1
-	lbu	$t1, ramBuffer+0x25c9	#t1 = total number of items count	
-AdjustItemK:	add	$s0, $t1, $t5		#adjust s0 = max_items + to add or not to add
+	ble	$s0, $t1, SetItemCommit	# no need for appending if item # < max_item count
+	#if you made it to here, then you're probably adding a new item
+AdjustItemK:	addi	$s0, $t1, 1		#adjust s0 = max_items + 1
 	sb	$s0, ramBuffer+0x25c9	#ram[item count] = new item count
 	li	$t1, 0xff
 	mul	$t2, $s0, 2		#t2 = item end offset
-	sb	$t1, ramBuffer+0x25ca($t2)	#ram[item end offset] = 0xff
-	
-SetItemsReturn:	mul	$t0, $s0, 2		
+	sb	$t1, ramBuffer+0x25ca($t2)	#ramBuffer[item end offset] = 0xff	
+SetItemCommit:	beqz	$s1, SetItemDelete		#check if legit yung item id
+	beqz	$s2, SetItemDelete		#check if legit yung item qty
+	mul	$t0, $s0, 2		
 	addi	$t0, $t0, 0x25c8		#t0 = offset in ram = 0x25c8 + 2k
 	sb	$s1, ramBuffer($t0)		#ramBuffer[2k] = item id
 	sb	$s2, ramBuffer+1($t0)	#ramBuffer[2k+1] = item qty
-	pop($s2)
+	j	SetItemReturn
+SetItemDelete:	lbu	$t1, ramBuffer+0x25c9
+	subi	$s0, $t1, 1
+	sb	$s0, ramBuffer+0x25c9	#ram[item count] = new item count
+	li	$t1, 0xff		
+	mul	$t2, $s0, 2		#t2 = item end offset
+	sb	$t1, ramBuffer+0x25ca($t2)	#ramBuffer[item end offset] = 0xff
+SetItemReturn:	pop($s2)
 	pop($s1)
 	pop($s0)
 	pop($ra)
