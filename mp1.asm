@@ -48,9 +48,10 @@ currentItems:	.asciiz	"#Current Items:\n"
 enterNewItems:	.asciiz	"#Please enter new item in format: <#> 0x<ID> <QTY>\n"
 emptyItems:	.asciiz	"EMPTY"
 titlePokemon:	.asciiz	"#Title Pokemon Displayed:\n"
+enterDialogue:	.asciiz	"#Enter Dialogue you wish to search:\n"
 notFound:	.asciiz	"NOT FOUND"
 currentMamaLogue:	.asciiz	"#Current Mom's Dialogue:\n"
-
+enterNewMamaLogue:	.asciiz	"#Enter the new Mom's Dialogue you want:\n"
 enterRomName:	.asciiz	"#Please enter .gb file name:\n"
 enterRamName:	.asciiz	"#Please enter .sav file name:\n"
 funcTutorial:	.ascii	"#Enter the number of the function you'd like to do\n"
@@ -61,6 +62,7 @@ funcTutorial:	.ascii	"#Enter the number of the function you'd like to do\n"
 	.ascii	"#5 - Title screen Pokemon display\n"
 	.ascii	"#6 - Dialogue search\n"
 	.asciiz	"#7 - Mom's dialogue edit\n"
+funcErrorString:	.asciiz	"#invalid function number: must be in range of [1,7]\n"
 
 .text
 .macro	print_int(%reg)
@@ -228,6 +230,7 @@ funcTutorial:	.ascii	"#Enter the number of the function you'd like to do\n"
 	jal	GetTitlePokemon
 .end_macro
 .macro	dialogue_search
+	print_string(enterDialogue)
 	scan_string(stringBuffer, 31)
 	jal	StripNewLine
 	jal	DialogSearch	
@@ -243,6 +246,7 @@ Dialogue_Out:
 	jal	GetMamaLogue
 	print_string(stringBuffer)
 	print_chari('\n')
+	print_string(enterNewMamaLogue)
 	scan_string(stringBuffer, 150)
 	jal	SetMamaLogue
 .end_macro
@@ -280,27 +284,30 @@ main:
 	beq	$s5, 5, Func5
 	beq	$s5, 6, Func6
 	beq	$s5, 7, Func7
-	j	Commitment
+	j	FunctionErrors
 Func1:	change_name
-	j	Commitment
+	j	CommitmentRam
 Func2:	change_money
-	j	Commitment
+	j	CommitmentRam
 Func3:	change_badges
-	j	Commitment
+	j	CommitmentRam
 Func4:	change_items
-	j	Commitment
+	j	CommitmentRam
 Func5:	show_title_pokemon
-	j	Commitment
+	j	EndGame
 Func6:	dialogue_search
-	j	Commitment
+	j	EndGame
 Func7:	change_mamalogue
-	j	Commitment
+	j	CommitmentRom
 
-Commitment:
-	commit_ram_buffer
-#	commit_rom_buffer
+
+CommitmentRam:	commit_ram_buffer
+	j	EndGame
+CommitmentRom:	commit_rom_buffer
 	j	EndGame
 FileErrors:	print_string(fileErrorString)
+	j	EndGame
+FunctionErrors:	print_string(funcErrorString)
 EndGame:	li	$v0, 10
 	syscall
 	
@@ -383,25 +390,25 @@ CheckSumRamBreak:	nor	$t2, $t2, $t2
 	andi	$t2, $t2, 0x000000FF
 	lbu	$t1, ramBuffer+0x3523
 	print_string(checkSumRamString)
-	print_int($t1)
+	print_hex($t1)
 	print_chari('=')
 	print_chari('>')
-	print_int($t2)
+	print_hex($t2)
 	print_chari('\n')
 	sb	$t2, ramBuffer+0x3523
 	pop($ra)
 	jr	$ra
 	
-#computes checksum of RoM and assigns it to address 0x3523
+#computes checksum of RoM and assigns it to address 0x14e-0x14f
 FixCheckSumRom:	push($ra)
-	li	$t0, 0
-	li	$t2, 0
+	li	$t0, 0		#t0 = ROM index
+	li	$t2, 0		#t2 = checksum accumulator
 CheckSumRomLoop:	bge	$t0, 1048576, CheckSumRomBreak
 	beq	$t0, 0x14e, CheckSumRomUpdate
 	beq	$t0, 0x14f, CheckSumRomUpdate
-	lbu	$t1, romBuffer($t0)
+	lbu	$t1, romBuffer($t0)		#t1 = ROM[romIndex]
 	add	$t2, $t2, $t1
-	andi	$t2, $t2, 0x0000FFFF
+	andi	$t2, $t2, 0x0000FFFF	#modulo it in the loop to prevent overflow
 CheckSumRomUpdate:	addi	$t0, $t0, 1
 	j	CheckSumRomLoop
 CheckSumRomBreak:	lbu	$t3, romBuffer+0x14e
@@ -409,10 +416,10 @@ CheckSumRomBreak:	lbu	$t3, romBuffer+0x14e
 	sll	$t3, $t3, 8
 	add	$t1, $t3, $t4
 	print_string(checkSumRomString)
-	print_int($t1)
+	print_hex($t1)			#t1 = old checksum
 	print_chari('=')
 	print_chari('>')
-	print_int($t2)
+	print_hex($t2)			#t2 = newly calculated checksum
 	print_chari('\n')
 	srl	$t3, $t2, 8
 	sb	$t3, romBuffer+0x14e
